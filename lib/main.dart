@@ -1,113 +1,268 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:just_audio/just_audio.dart';
+
+import 'package:Folderplay/managers/path_manager.dart';
 
 void main() {
   runApp(MyApp());
 }
 
 class MyApp extends StatelessWidget {
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
+      title: 'Folderplay',
       theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // Try running your application with "flutter run". You'll see the
-        // application has a blue toolbar. Then, without quitting the app, try
-        // changing the primarySwatch below to Colors.green and then invoke
-        // "hot reload" (press "r" in the console where you ran "flutter run",
-        // or simply save your changes to "hot reload" in a Flutter IDE).
-        // Notice that the counter didn't reset back to zero; the application
-        // is not restarted.
-        primarySwatch: Colors.blue,
-      ),
-      home: MyHomePage(title: 'Flutter Demo Home Page'),
+          // primarySwatch: Colors.blue,
+          ),
+      home: MyHomePage(),
     );
   }
 }
 
 class MyHomePage extends StatefulWidget {
-  MyHomePage({Key key, this.title}) : super(key: key);
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
-
   @override
   _MyHomePageState createState() => _MyHomePageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+enum STATUS {
+  PLAYING,
+  PAUSED,
+  STOPPED,
+  NEXT_SONG,
+  PREVIOUS_SONG,
+}
 
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
+class _MyHomePageState extends State<MyHomePage> {
+  PathManager _pm = PathManager();
+  AudioPlayer _player = AudioPlayer();
+  Timer? _everySecond;
+
+  // StreamController<STATUS> _statusStream = StreamController<STATUS>();
+  List<String> _playlist = [];
+  bool _isPlaying = false;
+  bool _isPaused = false;
+  bool _isStopped = false;
+  int _currentSongIndex = 0;
+  Duration _currentPosition = Duration.zero;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _player.playerStateStream.listen((state) {
+      switch (state.processingState) {
+        case ProcessingState.idle:
+          {}
+          break;
+        case ProcessingState.loading:
+          {}
+          break;
+        case ProcessingState.buffering:
+          {}
+          break;
+        case ProcessingState.ready:
+          {}
+          break;
+        case ProcessingState.completed:
+          {
+            _nextSong();
+          }
+      }
     });
   }
 
+  void _positionUpdate() {
+    _everySecond = Timer.periodic(Duration(seconds: 1), (Timer t) {
+      setState(() {
+        _currentPosition = _player.position;
+      });
+    });
+  }
+
+  void _stopPositionUpdate() {
+    _everySecond!.cancel();
+  }
+
+  _stateManager(STATUS status) {
+    if (!_hasPlaylist) return;
+
+    switch (status) {
+      case STATUS.PLAYING:
+        {
+          setState(() {
+            _isPlaying = true;
+            _isPaused = false;
+            _isStopped = false;
+
+            _player.setFilePath(_playlist[_currentSongIndex], initialPosition: _currentPosition);
+            _player.play();
+          });
+          _positionUpdate();
+        }
+        break;
+      case STATUS.PAUSED:
+        {
+          setState(() {
+            _isPlaying = false;
+            _isPaused = true;
+            _isStopped = false;
+            _currentPosition = _player.position;
+
+            _player.setFilePath(_playlist[_currentSongIndex], initialPosition: _currentPosition);
+            _player.pause();
+          });
+          _stopPositionUpdate();
+        }
+        break;
+      case STATUS.STOPPED:
+        {
+          setState(() {
+            _isPlaying = false;
+            _isPaused = false;
+            _isStopped = true;
+            _currentPosition = Duration.zero;
+
+            _player.setFilePath(_playlist[_currentSongIndex], initialPosition: _currentPosition);
+            _player.pause();
+          });
+          _stopPositionUpdate();
+        }
+        break;
+      case STATUS.NEXT_SONG:
+        {
+          setState(() {
+            _isPlaying = true;
+            _isPaused = false;
+            _isStopped = false;
+            _currentPosition = Duration.zero;
+            _currentSongIndex = _currentSongIndex + 1;
+
+            _player.setFilePath(_playlist[_currentSongIndex], initialPosition: _currentPosition);
+            _player.play();
+          });
+          _positionUpdate();
+        }
+        break;
+      case STATUS.PREVIOUS_SONG:
+        {
+          setState(() {
+            _isPlaying = true;
+            _isPaused = false;
+            _isStopped = false;
+            _currentPosition = Duration.zero;
+            _currentSongIndex = _currentSongIndex - 1;
+
+            _player.setFilePath(_playlist[_currentSongIndex], initialPosition: _currentPosition);
+            _player.play();
+          });
+          _positionUpdate();
+        }
+        break;
+    }
+  }
+
+  @override
+  void dispose() {
+    _player.dispose();
+    super.dispose();
+  }
+
+  void _selectFolder() async {
+    List<String> newPlaylist = await _pm.getSelectedFolderFilesPaths();
+
+    setState(() {
+      _playlist = newPlaylist;
+      _playlist.forEach((element) {
+        print('==> $element');
+      });
+    });
+  }
+
+  // TODO: show slider with position of playble place
+  // TODO: show 00:00:00 changing position
+  // TODO: show 00:00:00 duration of song
+  // TODO: show selectable list of songs
+  void play() {
+    if (_isPlaying) return;
+
+    _stateManager(STATUS.PLAYING);
+  }
+
+  stop() {
+    if (_isStopped) return;
+
+    _stateManager(STATUS.STOPPED);
+  }
+
+  pause() {
+    if (_isPaused) return;
+
+    _stateManager(STATUS.PAUSED);
+  }
+
+  void _previousSong() {
+    if (!_hasPreviousSong) return;
+
+    _stateManager(STATUS.PREVIOUS_SONG);
+  }
+
+  void _nextSong() {
+    if (!_hasNextSong) return;
+
+    _stateManager(STATUS.NEXT_SONG);
+  }
+
+  bool get _hasNextSong => (_playlist.length - 2) - _currentSongIndex > 0;
+
+  bool get _hasPreviousSong => _currentSongIndex > 0;
+
+  bool get _hasPlaylist => _playlist.length > 0;
+
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
     return Scaffold(
       appBar: AppBar(
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
+        title: Text('Folderplay'),
       ),
       body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
         child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Invoke "debug painting" (press "p" in the console, choose the
-          // "Toggle Debug Paint" action from the Flutter Inspector in Android
-          // Studio, or the "Toggle Debug Paint" command in Visual Studio Code)
-          // to see the wireframe for each widget.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
-            Text(
-              'You have pushed the button this many times:',
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Flexible(
+                  child: Text('Song: ${_hasPlaylist ? _playlist[_currentSongIndex] : ''}'),
+                ),
+                Flexible(
+                  child: Text('Duration of song: ${_hasPlaylist ? _player.duration : ''}'),
+                ),
+                Flexible(
+                  child: Text('Position: ${_hasPlaylist ? _currentPosition : ''}'),
+                ),
+              ],
             ),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headline4,
-            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                TextButton(onPressed: _selectFolder, child: Text('Select Folder')),
+                TextButton(onPressed: _hasPreviousSong ? _previousSong : null, child: Text('Previous')),
+                TextButton(
+                    onPressed: _hasPlaylist
+                        ? !_isPlaying
+                            ? play
+                            : pause
+                        : null,
+                    child: Text(_isPlaying ? 'Pause' : 'Play')),
+                TextButton(onPressed: _hasNextSong ? _nextSong : null, child: Text('Next')),
+              ],
+            )
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: Icon(Icons.add),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
     );
   }
 }
